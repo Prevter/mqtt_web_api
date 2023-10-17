@@ -41,7 +41,8 @@ func Middleware(handler http.Handler) http.Handler {
 
 		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api") {
 			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			origin := r.Header.Get("Origin")
+			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			if r.Method == "OPTIONS" {
 				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")

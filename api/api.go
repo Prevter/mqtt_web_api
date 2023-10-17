@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
+	"mqtt_web_api/api/models"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ func MakeHandler(router *mux.Router) {
 
 	// NOTE: this handler is developed for testing purposes only and should be removed in production
 	router.HandleFunc("/console", ConsoleHandler).Methods("POST")
+
+	router.HandleFunc("/select/{table}", GetHandler).Methods("GET")
 }
 
 func AuthHandler(w http.ResponseWriter, r *http.Request) {
@@ -76,92 +79,211 @@ func ConsoleHandler(w http.ResponseWriter, r *http.Request) {
 	query := r.FormValue("query")
 
 	// get cookie which contains connection credentials ('token')
+	cookie, err := GetCookie(r)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":401,"error":"%s"}`, L10n("Invalid credentials", r))))
+		return
+	}
+
+	// decode the cookie value
+	username, password, err := Decode(cookie.Value)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, L10n("Invalid token", r))))
+		return
+	}
+
+	// check if we can connect to the database with the given credentials
+	db, err := LoginDatabase(username, password)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":401,"error":"%s"}`, L10n("Invalid credentials", r))))
+		return
+	}
+
+	// if we can, we execute the query and return the result
+	rows, err := db.Database.Query(query)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, escaped)))
+		return
+	}
+
+	// return rows as JSON (use a library for this)
+	columns, err := rows.Columns()
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, escaped)))
+		return
+	}
+
+	values := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
+	rowObjects := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		for i := range columns {
+			valuePtrs[i] = &values[i]
+		}
+
+		err := rows.Scan(valuePtrs...)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
+			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":500,"error":"%s"}`, escaped)))
+			return
+		}
+
+		rowObject := make(map[string]interface{})
+		for i, col := range columns {
+			var v interface{}
+			val := values[i]
+			b, ok := val.([]byte)
+			if ok {
+				v = string(b)
+			} else {
+				v = val
+			}
+			rowObject[col] = v
+		}
+		rowObjects = append(rowObjects, rowObject)
+	}
+
+	jsonString, err := json.Marshal(rowObjects)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":500,"error":"%s"}`, escaped)))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(fmt.Sprintf(`{"status":200,"rows":%s}`, jsonString)))
+
+	_ = db.Disconnect()
+}
+
+func GetHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("GET %s\n", r.URL.Path)
+
+	// get page and limit from get parameters
+	page := r.FormValue("page")
+	limit := r.FormValue("limit")
+
+	if page == "" {
+		page = "0"
+	}
+
+	if limit == "" {
+		limit = "10"
+	}
+
+	// get table name from url
+	vars := mux.Vars(r)
+	table := vars["table"]
+
+	fmt.Printf("table: %s, (page: %s, limit: %s)", table, page, limit)
+
+	// get cookie which contains connection credentials ('token')
+	cookie, err := GetCookie(r)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":401,"error":"%s"}`, L10n("Invalid credentials", r))))
+		return
+	}
+
+	// decode the cookie value
+	username, password, err := Decode(cookie.Value)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, L10n("Invalid token", r))))
+		return
+	}
+
+	// check if we can connect to the database with the given credentials
+	db, err := LoginDatabase(username, password)
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":401,"error":"%s"}`, L10n("Invalid credentials", r))))
+		return
+	}
+
+	var rows interface{}
+
+	switch table {
+	case "category":
+		var categories []models.Category
+		categories, err = db.GetCategories(page, limit)
+		rows = categories
+	case "coordinates":
+		var coordinates []models.Coordinates
+		coordinates, err = db.GetCoordinates(page, limit)
+		rows = coordinates
+	case "favorite":
+		var favorites []models.Favorite
+		favorites, err = db.GetFavorites(page, limit)
+		rows = favorites
+	case "measured_unit":
+		var units []models.MeasuredUnit
+		units, err = db.GetMeasuredUnits(page, limit)
+		rows = units
+	case "measurement":
+		var measurments []models.Measurement
+		measurments, err = db.GetMeasurements(page, limit)
+		rows = measurments
+	case "mqtt_server":
+		var servers []models.MqttServer
+		servers, err = db.GetMqttServers(page, limit)
+		rows = servers
+	case "mqtt_unit":
+		var units []models.MqttUnit
+		units, err = db.GetMqttUnits(page, limit)
+		rows = units
+	case "optimal_value":
+		var values []models.OptimalValue
+		values, err = db.GetOptimalValues(page, limit)
+		rows = values
+	case "station":
+		var stations []models.Station
+		stations, err = db.GetStations(page, limit)
+		rows = stations
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, L10n("Invalid table name", r))))
+		return
+	}
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, escaped)))
+		return
+	}
+
+	jsonString, err := json.Marshal(rows)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"status":500,"error":"%s"}`, escaped)))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(fmt.Sprintf(`{"status":200,"rows":%s}`, jsonString)))
+
+	_ = db.Disconnect()
+}
+
+func GetCookie(r *http.Request) (cookie *http.Cookie, err error) {
 	cookies := r.Cookies()
 	for _, cookie := range cookies {
 		if cookie.Name == "token" {
-			// decode the cookie value
-			username, password, err := Decode(cookie.Value)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, L10n("Invalid token", r))))
-				return
-			}
-
-			// check if we can connect to the database with the given credentials
-			db, err := LoginDatabase(username, password)
-			if err != nil {
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(fmt.Sprintf(`{"status":401,"error":"%s"}`, L10n("Invalid credentials", r))))
-				return
-			}
-
-			// if we can, we execute the query and return the result
-			rows, err := db.Database.Query(query)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
-				_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, escaped)))
-				return
-			}
-
-			// return rows as JSON (use a library for this)
-			columns, err := rows.Columns()
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
-				_, _ = w.Write([]byte(fmt.Sprintf(`{"status":400,"error":"%s"}`, escaped)))
-				return
-			}
-
-			values := make([]interface{}, len(columns))
-			valuePtrs := make([]interface{}, len(columns))
-			rowObjects := make([]map[string]interface{}, 0)
-			for rows.Next() {
-				for i := range columns {
-					valuePtrs[i] = &values[i]
-				}
-
-				err := rows.Scan(valuePtrs...)
-				if err != nil {
-					w.WriteHeader(http.StatusBadRequest)
-					escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
-					_, _ = w.Write([]byte(fmt.Sprintf(`{"status":500,"error":"%s"}`, escaped)))
-					return
-				}
-
-				rowObject := make(map[string]interface{})
-				for i, col := range columns {
-					var v interface{}
-					val := values[i]
-					b, ok := val.([]byte)
-					if ok {
-						v = string(b)
-					} else {
-						v = val
-					}
-					rowObject[col] = v
-				}
-				rowObjects = append(rowObjects, rowObject)
-			}
-
-			jsonString, err := json.Marshal(rowObjects)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				escaped := strings.ReplaceAll(err.Error(), `"`, `\"`)
-				_, _ = w.Write([]byte(fmt.Sprintf(`{"status":500,"error":"%s"}`, escaped)))
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"status":200,"rows":%s}`, jsonString)))
-
-			_ = db.Disconnect()
-			return
+			return cookie, nil
 		}
 	}
-
-	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(fmt.Sprintf(`{"status":401,"error":"%s"}`, L10n("Invalid credentials", r))))
+	return nil, fmt.Errorf("no token cookie found")
 }
 
 func Decode(encoded string) (username, password string, err error) {
