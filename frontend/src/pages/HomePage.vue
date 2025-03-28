@@ -1,128 +1,160 @@
 <script setup>
-import { ref } from 'vue';
+import NavSidebar from '../components/NavSidebar.vue';
+import StationsPage from './StationsPage.vue';
+import MeasurementsPage from './MeasurementsPage.vue';
+import ReportPage from './ReportPage.vue';
+
 import { getRouter } from '../router';
+import { ref } from 'vue';
 const router = getRouter();
 
 if (!localStorage.getItem('token')) router.replace('/login');
 
+const username = ref(localStorage.getItem('username'));
+
+const perms = {
+    "postgres": {
+        "home": true,
+        "reports": true,
+    },
+    "ecographix": {
+        "home": true,
+        "reports": true,
+    },
+}
+
+const role = perms[username.value] || {
+    "home": false,
+    "reports": true,
+}
+
+const pages = [];
+
+if (role.home) pages.push({
+    id: 'home',
+    title: 'Дані',
+    active: true,
+    pages: [
+        {
+            title: 'Станції',
+            path: 'stations',
+            icon: 'fa fa-building'
+        },
+        {
+            title: 'Вимірювання',
+            path: 'measurements',
+            icon: 'fa fa-database'
+        },
+    ]
+});
+
+if (role.reports) pages.push({
+    id: 'reports',
+    title: 'Звіти',
+    active: true,
+    pages: [
+        {
+            title: 'Список підключених станцій',
+            path: 'report/stations',
+            icon: 'fa fa-file-text-o'
+        },
+        {
+            title: 'Результати вимірювань станції',
+            path: 'report/measurements',
+            icon: 'fa fa-file-text-o'
+        },
+        {
+            title: 'Макс. значення шкідливих частинок',
+            path: 'report/maxparticles',
+            icon: 'fa fa-pie-chart'
+        },
+        {
+            title: 'Фіксації шкідливого рівня частинок',
+            path: 'report/badparticles',
+            icon: 'fa fa-pie-chart'
+        },
+        {
+            title: 'Фіксації діоксиду сірки',
+            path: 'report/sulfur',
+            icon: 'fa fa-pie-chart'
+        },
+        {
+            title: 'Фіксації чадного газу',
+            path: 'report/carbon',
+            icon: 'fa fa-pie-chart'
+        }
+    ]
+});
+
+const page = ref('');
+page.value = router.currentRoute.value.params.page;
+
+if (!page.value) {
+    router.replace('/stations');
+    page.value = 'stations';
+}
+
 function logout() {
-    fetch(`${API_URL}/auth`, {
-        method: 'DELETE',
-        credentials: 'include'
-    })
-        .then(response => response.json())
-        .then(_data => {
-            localStorage.removeItem('token');
-            router.replace('/login');
-        })
-        .catch(error => {
-            console.error(error);
-        });
+    router.replace('/logout')
 }
 
-const consoleInput = ref('SELECT * FROM Station');
-const error = ref('');
-const result = ref([]);
-let keys;
+function navigate(path) {
+    console.log(path);
+    path = path.path || path;
+    const splitPath = path.split('/');
 
-function buildTableOutput() {
-    if (typeof result.value === 'string') {
-        return `<div class="bg-red-500 w-full text-white font-bold py-2 px-4 rounded">${result.value}</div>`;
+    if (page.value === splitPath[0]) {
+        router.replace(`/${path}/`);
+        router.currentRoute.value.params.options = splitPath.length > 1 ? splitPath[1] : undefined;
+        return;
     }
 
-    let output = '<table class="table-auto w-full">';
-    if (result.value.length > 0) {
-        output += '<thead><tr>';
-        for (const key in result.value[0]) {
-            output += `<th class="px-4 py-2">${key}</th>`;
-        }
-        output += '</tr></thead>';
-    }
-    output += '<tbody>';
-    for (const row of result.value) {
-        output += '<tr>';
-        for (const key in row) {
-            output += `<td class="border px-4 py-2">${row[key]}</td>`;
-        }
-        output += '</tr>';
-    }
-    output += '</tbody></table>';
-    return output;
-}
-
-function submitConsoleInput() {
-    const formdata = new FormData();
-    formdata.append('query', consoleInput.value);
-
-    fetch(`${API_URL}/console`, {
-        method: 'POST',
-        body: formdata,
-        credentials: 'include'
-    })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                error.value = data.error;
-            } else {
-                result.value = data.rows;
-                keys = Object.keys(data.rows[0]);
-            }
-        })
-        .catch(error => {
-            console.error(error);
-        });
+    page.value = splitPath[0];
+    router.currentRoute.value.params.options = splitPath.length > 1 ? splitPath[1] : undefined;
+    router.replace(`/${path}/`);
 }
 
 </script>
 
 <template>
-    <div class="container mx-auto px-4 py-8">
-        <div class="flex justify-end">
-            <button class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
-                @click="logout">Logout</button>
-        </div>
-        <div class="mt-8">
-            <div class="bg-gray-200 dark:bg-gray-800 rounded-lg p-4">
-                <div class="flex items-center mb-4">
-                    <div class="bg-red-500 w-full text-white font-bold py-2 px-4 rounded" v-if="error">
-                        {{ error }}
+    <div class="d-flex">
+        <NavSidebar :pages="pages" title="EcoGraphix" v-on:open-page="navigate" v-on:logout="logout" />
+        <div class="w-100">
+            <header class="d-flex">
+                <div class="ms-auto d-flex">
+                    <div class="my-auto me-2">
+                        <i class="fa fa-user-circle-o"></i>
+                        {{ username }}
                     </div>
-                    <table class="table-auto w-full" v-else-if="result.length">
-                        <thead>
-                            <tr>
-                                <th class="px-4 py-2" v-for="key in keys">{{ key }}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="row in result">
-                                <td class="border px-4 py-2" v-for="key in keys">{{ row[key] }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
+                    <button class="btn btn-sm btn-outline-danger my-auto me-2" @click="logout">
+                        <i class="fa fa-power-off"></i>
+                        Вихід
+                    </button>
                 </div>
-                <div class="flex items-center mb-4">
-                    <input type="text" id="console-input"
-                        class="dark:bg-gray-700 dark:text-white rounded-lg py-2 px-4 w-full" v-model="consoleInput">
-                    <button
-                        class="text-black hover:text-gray-800 dark:hover:text-blue-200 dark:text-white font-bold mt-auto py-2 px-4 rounded"
-                        @click="submitConsoleInput">Submit</button>
-                </div>
+            </header>
+            <div class="container">
+                <StationsPage v-if="page === 'stations' && role.home" v-on:navigate="navigate" />
+                <MeasurementsPage v-if="page === 'measurements' && role.home" v-on:navigate="navigate" />
+                <ReportPage v-if="page === 'report' && role.reports" v-on:navigate="navigate" />
             </div>
         </div>
     </div>
 </template>
 
-<style scoped>
-.console-input {
-    @apply dark:bg-gray-700 dark:text-white rounded-lg py-2 px-4 w-full;
+<style>
+:root {
+    --header-bg: linear-gradient(90deg, #bbdefb 0%, #93bde0 100%);
 }
 
-.console-input:focus {
-    @apply outline-none;
+:root[data-bs-theme='dark'] {
+    --header-bg: linear-gradient(90deg, #1f0c3d 0%, #2b1166 100%);
 }
 
-.console-input:focus-visible {
-    @apply ring-2 ring-blue-500;
+header {
+    display: block;
+    height: 60px;
+    width: 100%;
+    background: var(--header-bg);
+    border: 1px solid rgba(0, 0, 0, 0.3);
 }
-
 </style>

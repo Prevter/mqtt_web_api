@@ -4,38 +4,42 @@ import { ref } from 'vue';
 const cookieModal = ref(null);
 
 function acceptCookies() {
-    cookieModal.value.classList.add('opacity-0', 'translate-y-4');
-    cookieModal.value.classList.remove('opacity-100', 'translate-y-0');
+    cookieModal.value.classList.add('opacity-0');
     setTimeout(() => {
-        cookieModal.value.classList.add('hidden');
+        cookieModal.value.classList.add('d-none');
     }, 300);
     localStorage.setItem('cookiesAccepted', true);
 }
 
 if (!localStorage.getItem('cookiesAccepted')) {
     setTimeout(() => {
-        cookieModal.value.classList.remove('hidden');
-        cookieModal.value.classList.add('opacity-100', 'translate-y-0');
+        cookieModal.value.classList.remove('opacity-0');
     }, 1000);
 }
 </script>
 
 <template>
-    <div ref="cookieModal" class="cookie-modal fixed bottom-4 left-2 mb-2 max-w-sm p-6 dark:bg-slate-900 bg-white border dark:border-gray-950 border-gray-300 rounded shadow-md transform translate-y-4 opacity-0">
-        <p class="mb-4">
-            🍪 Цей веб-сайт використовує файли cookie для зберігання даних на вашому комп'ютері.
-        </p>
-        <button @click="acceptCookies"
-            class="flex justify-end bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors duration-300 ml-auto focus:outline-none">
-            Добре
-        </button>
+    <div ref="cookieModal" class="cookie-modal opacity-0">
+        <span>🍪 Цей веб-сайт використовує файли cookie для зберігання даних на вашому комп'ютері.</span>
+        <div class="mt-2 d-flex align-items-center justify-content-center g-2">
+            <button @click="acceptCookies" class="btn btn-success mr-1">Добре</button>
+        </div>
     </div>
 </template>
 
 <style scoped>
 .cookie-modal {
-    z-index: 100;
-    @apply transition-all duration-300;
+    position: fixed;
+    bottom: 4rem;
+    left: 2rem;
+    margin-bottom: 2rem;
+    max-width: 20rem;
+    padding: 1.5rem;
+    background-color: #454545;
+    border: 1px solid #707070;
+    border-radius: 0.375rem;
+    box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.05);
+    transition: transform 0.3s ease, opacity 0.3s ease;
 }
 </style>
 
